@@ -1,0 +1,123 @@
+project:
+  name: gemma-health
+  seed: 42
+  output_dir: artifacts
+
+model:
+  base_id: google/gemma-4-e4b
+  max_seq_length: 2048
+  load_in_4bit: true
+
+datasets:
+  - name: telugu_alpaca
+    enabled: true
+    weight: 0.20
+    language_status: native_telugu
+    hf_id: Telugu-LLM-Labs/telugu_alpaca_yahma_cleaned_filtered_romanized
+    split: train
+  - name: symptom_diagnosis
+    enabled: true
+    weight: 0.35
+    language_status: synthetic_telugu
+    hf_id: gretelai/symptom_to_diagnosis
+    split: train
+    synthetic_telugu: true
+  - name: medmcqa
+    enabled: true
+    weight: 0.25
+    language_status: synthetic_telugu
+    hf_id: openlifescienceai/medmcqa
+    split: train
+    synthetic_telugu: true
+  - name: indivibe_chat
+    enabled: true
+    weight: 0.10
+    language_status: translation_pair
+    hf_id: sarvamai/indivibe
+    hf_config: chat
+    split: test
+    language: Telugu
+    scripts:
+      - native
+      - romanised
+  - name: indivibe_stem
+    enabled: true
+    weight: 0.10
+    language_status: translation_pair
+    hf_id: sarvamai/indivibe
+    hf_config: stem
+    split: test
+    language: Telugu
+    scripts:
+      - native
+      - romanised
+  - name: prescriptions
+    enabled: false
+    weight: 0.0
+    language_status: needs_translation
+    hf_id: mehaksingal/illegible-medical-prescription-images-dataset
+    split: train
+  - name: field_dialogues
+    enabled: false
+    weight: 0.0
+    language_status: native_telugu
+    path: data/raw/field_dialogues.jsonl
+    split: train
+
+training:
+  method: sft
+  backend: unsloth
+  run_name: 000_smoke
+  load_all_examples: true
+  train_examples: 1000
+  batch_size: 2
+  gradient_accumulation_steps: 8
+  learning_rate: 0.00002
+  epochs: 1
+  save_steps: 100
+  push_to_hub: false
+
+grpo:
+  group_size: 8
+  max_prompt_length: 1024
+  max_completion_length: 512
+  rewards:
+    - triage_format
+    - safety_escalation
+    - telugu_density
+    - brevity
+
+eval:
+  suites:
+    - triage_safety
+    - telugu_quality
+    - prescription_reading
+  emergency_recall_min: 0.95
+  unsafe_undertriage_max: 0.02
+
+scaling:
+  enabled: true
+  probe_sizes:
+    - 250
+    - 1000
+    - 4000
+  compute_targets:
+    - t4
+    - a10g
+    - h100
+
+serving:
+  target: android
+  runtime: litert
+  ai_edge_sdk: true
+  mediapipe:
+    image_preprocess: true
+    prescription_ocr_preprocess: true
+  export:
+    format: task
+    quantization: int4
+    output_dir: artifacts/android
+  android:
+    asset_model_name: gemma_health.task
+    asset_manifest_name: model_manifest.json
+    require_no_internet_permission: true

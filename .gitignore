@@ -1,0 +1,53 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+docs/.venv/
+
+# Local agent state and copied skills
+.agent/
+.agents/
+skills-lock.json
+
+# Generated or downloaded data
+data/raw/**
+data/staged/**
+data/processed/**
+data/manifests/**
+data/samples/**
+!data/raw/
+!data/staged/
+!data/processed/
+!data/manifests/
+!data/samples/
+!data/raw/.gitkeep
+!data/staged/.gitkeep
+!data/processed/.gitkeep
+!data/manifests/.gitkeep
+!data/samples/.gitkeep
+*.parquet
+*.jsonl
+
+# Training/eval outputs
+runs/**
+artifacts/**
+!runs/
+!runs/.gitkeep
+!artifacts/
+!artifacts/**/
+!artifacts/**/.gitkeep
+
+# Model/checkpoint artifacts
+*.safetensors
+*.gguf
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.task

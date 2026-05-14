@@ -1,0 +1,29 @@
+[project]
+name = "gemma-health"
+version = "0.1.0"
+description = "Gemma health model training, evaluation, scaling, and Android export pipeline."
+readme = "README.md"
+authors = [
+    { name = "whitehatjr1001", email = "rohithsaimidigudla@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "datasets>=4.8.5",
+    "ollama>=0.6.2",
+    "pyyaml>=6.0.2",
+]
+
+[project.scripts]
+gemma-health = "gemma_health.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.10.11,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
