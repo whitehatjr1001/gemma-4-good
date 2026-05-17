@@ -9,9 +9,11 @@ from gemma_health.data.sft import load_sft_jsonl_sample, validate_sft_jsonl
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Upload an SFT JSONL file to a Hugging Face dataset repo.")
-    parser.add_argument("--input", default="data/processed/sft/train.jsonl")
+    parser.add_argument("--input", default="data/processed/sft/telugu/train.jsonl")
+    parser.add_argument("--test-input")
     parser.add_argument("--repo-id", required=True, help="Example: username/gemma-health-telugu-sft")
     parser.add_argument("--split", default="train")
+    parser.add_argument("--test-split", default="test")
     parser.add_argument("--private", action="store_true")
     parser.add_argument("--upload", action="store_true", help="Actually upload. Without this, only validates.")
     args = parser.parse_args()
@@ -19,10 +21,16 @@ def main() -> None:
     input_path = Path(args.input)
     row_count = validate_sft_jsonl(input_path)
     sample = load_sft_jsonl_sample(input_path, limit=1)[0]
+    test_path = Path(args.test_input) if args.test_input else None
+    test_row_count = validate_sft_jsonl(test_path) if test_path is not None else 0
 
     print(f"validated {row_count} rows from {input_path}")
+    if test_path is not None:
+        print(f"validated {test_row_count} rows from {test_path}")
     print(f"sample source={sample['source']} variant={sample['variant']}")
     print(f"streaming train command: load_dataset('{args.repo_id}', split='{args.split}', streaming=True)")
+    if test_path is not None:
+        print(f"streaming test command: load_dataset('{args.repo_id}', split='{args.test_split}', streaming=True)")
 
     if not args.upload:
         print("dry run only; pass --upload to publish to Hugging Face")
@@ -41,19 +49,33 @@ def main() -> None:
         path_or_fileobj=input_path,
         path_in_repo=f"data/{args.split}.jsonl",
     )
+    if test_path is not None:
+        api.upload_file(
+            repo_id=args.repo_id,
+            repo_type="dataset",
+            path_or_fileobj=test_path,
+            path_in_repo=f"data/{args.test_split}.jsonl",
+        )
     with TemporaryDirectory() as temp_dir:
         readme_path = Path(temp_dir) / "README.md"
-        readme_path.write_text(_dataset_card(args.repo_id, args.split, row_count), encoding="utf-8")
+        readme_path.write_text(
+            _dataset_card(args.repo_id, args.split, row_count, args.test_split if test_path else None, test_row_count),
+            encoding="utf-8",
+        )
         api.upload_file(
             repo_id=args.repo_id,
             repo_type="dataset",
             path_or_fileobj=readme_path,
             path_in_repo="README.md",
         )
-    print(f"uploaded {row_count} rows to {args.repo_id}")
+    print(f"uploaded {row_count + test_row_count} rows to {args.repo_id}")
 
 
-def _dataset_card(repo_id: str, split: str, row_count: int) -> str:
+def _dataset_card(repo_id: str, split: str, row_count: int, test_split: str | None, test_row_count: int) -> str:
+    test_line = f"- `{test_split}`: {test_row_count} rows\n" if test_split else ""
+    test_example = (
+        f'test_dataset = load_dataset("{repo_id}", split="{test_split}", streaming=True)\n' if test_split else ""
+    )
     return f"""---
 task_categories:
 - text-generation
@@ -67,7 +89,10 @@ tags:
 
 # Gemma Health Telugu SFT
 
-Rows: {row_count}
+Splits:
+
+- `{split}`: {row_count} rows
+{test_line}
 
 Each row contains:
 
@@ -79,6 +104,7 @@ Each row contains:
 from datasets import load_dataset
 
 dataset = load_dataset("{repo_id}", split="{split}", streaming=True)
+{test_example}
 ```
 """
 

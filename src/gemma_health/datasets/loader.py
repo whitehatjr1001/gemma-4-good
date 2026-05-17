@@ -9,7 +9,7 @@ from gemma_health.datasets.base import DatasetConfig, DatasetSource
 from gemma_health.types import TrainingExample
 
 
-Converter = Callable[[Mapping[str, Any], DatasetConfig], TrainingExample]
+Converter = Callable[[Mapping[str, Any], DatasetConfig], TrainingExample | list[TrainingExample]]
 
 
 class HuggingFaceDataset:
@@ -19,14 +19,22 @@ class HuggingFaceDataset:
         self.converter = converter
 
     def load(self) -> list[TrainingExample]:
-        examples: list[TrainingExample] = []
+        return list(self.iter_examples())
+
+    def iter_examples(self) -> Iterator[TrainingExample]:
+        count = 0
         for row in load_hf_rows(self.source):
             if not _matches_filter(row, self.source):
                 continue
-            if self.source.max_examples is not None and len(examples) >= self.source.max_examples:
+            if self.source.max_examples is not None and count >= self.source.max_examples:
                 break
-            examples.append(self.converter(row, self.source))
-        return examples
+            converted = self.converter(row, self.source)
+            converted_examples = converted if isinstance(converted, list) else [converted]
+            for example in converted_examples:
+                if self.source.max_examples is not None and count >= self.source.max_examples:
+                    break
+                count += 1
+                yield example
 
 
 class JsonlDataset:
@@ -36,6 +44,9 @@ class JsonlDataset:
         self.source = source
 
     def load(self) -> list[TrainingExample]:
+        return list(self.iter_examples())
+
+    def iter_examples(self) -> Iterator[TrainingExample]:
         if self.source.path is None:
             raise ValueError(f"Dataset {self.source.name!r} requires path in config.yaml")
 
@@ -43,7 +54,6 @@ class JsonlDataset:
         if not path.exists():
             raise FileNotFoundError(f"Field dialogues file does not exist: {path}")
 
-        examples: list[TrainingExample] = []
         with path.open("r", encoding="utf-8") as file:
             for index, line in enumerate(file):
                 if self.source.max_examples is not None and index >= self.source.max_examples:
@@ -51,14 +61,11 @@ class JsonlDataset:
                 row = json.loads(line)
                 if not isinstance(row, dict):
                     raise ValueError(f"Field dialogues row {index + 1} must be a JSON object")
-                examples.append(
-                    TrainingExample(
-                        prompt=required_text(row, "prompt", self.source.name),
-                        response=required_text(row, "response", self.source.name),
-                        source=self.source.name,
-                    )
+                yield TrainingExample(
+                    prompt=required_text(row, "prompt", self.source.name),
+                    response=required_text(row, "response", self.source.name),
+                    source=self.source.name,
                 )
-        return examples
 
 
 def build_dataset(source: DatasetConfig) -> DatasetSource:
@@ -67,6 +74,8 @@ def build_dataset(source: DatasetConfig) -> DatasetSource:
 
     converters: dict[str, Converter] = {
         "telugu_alpaca": _telugu_alpaca,
+        "english_telugu_parallel": _english_telugu_parallel,
+        "samanantar_te": _samanantar_translation,
         "symptom_diagnosis": _symptom_diagnosis,
         "medmcqa": _medmcqa,
         "prescriptions": _prescriptions,
@@ -82,6 +91,10 @@ def build_dataset(source: DatasetConfig) -> DatasetSource:
 
 
 def load_hf_rows(source: DatasetConfig) -> Iterator[dict[str, Any]]:
+    if source.path is not None:
+        yield from load_parquet_rows(source)
+        return
+
     if source.hf_id is None:
         raise ValueError(f"Dataset {source.name!r} requires hf_id in config.yaml")
 
@@ -106,6 +119,49 @@ def load_hf_rows(source: DatasetConfig) -> Iterator[dict[str, Any]]:
         yield dict(row)
 
 
+def load_parquet_rows(source: DatasetConfig) -> Iterator[dict[str, Any]]:
+    if source.path is None:
+        raise ValueError(f"Dataset {source.name!r} requires path in config.yaml")
+
+    path = Path(source.path)
+    if not path.exists():
+        raise FileNotFoundError(f"Dataset {source.name!r} parquet path does not exist: {path}")
+
+    paths = sorted(path.rglob("*.parquet")) if path.is_dir() else [path]
+    emitted = 0
+    for parquet_path in paths:
+        for row in _iter_parquet_rows(parquet_path, source.max_examples):
+            if not isinstance(row, Mapping):
+                raise ValueError(f"Expected mapping row from dataset {source.name!r}, got {type(row).__name__}")
+            yield dict(row)
+            emitted += 1
+            if source.max_examples is not None and emitted >= source.max_examples:
+                return
+
+
+def _iter_parquet_rows(path: Path, max_rows: int | None) -> Iterator[dict[str, Any]]:
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        try:
+            import pandas as pd
+        except ImportError as err:
+            raise RuntimeError("Install 'pyarrow' or 'pandas' to load local parquet datasets") from err
+        frame = pd.read_parquet(path)
+        rows = frame.head(max_rows).to_dict(orient="records") if max_rows is not None else frame.to_dict(orient="records")
+        yield from rows
+        return
+
+    emitted = 0
+    parquet = pq.ParquetFile(path)
+    for batch in parquet.iter_batches(batch_size=1024):
+        for row in batch.to_pylist():
+            yield row
+            emitted += 1
+            if max_rows is not None and emitted >= max_rows:
+                return
+
+
 def required_text(row: Mapping[str, Any], field: str, dataset_name: str) -> str:
     value = row.get(field)
     if not isinstance(value, str) or not value.strip():
@@ -126,14 +182,54 @@ def _matches_filter(row: Mapping[str, Any], source: DatasetConfig) -> bool:
     return True
 
 
-def _telugu_alpaca(row: Mapping[str, Any], source: DatasetConfig) -> TrainingExample:
-    instruction = required_text(row, "telugu_instruction", source.name)
-    input_text = optional_text(row, "telugu_input")
-    prompt = f"{instruction}\n\n{input_text}" if input_text else instruction
+def _telugu_alpaca(row: Mapping[str, Any], source: DatasetConfig) -> list[TrainingExample]:
+    return [
+        TrainingExample(
+            prompt=_instruction_prompt(
+                instruction=required_text(row, "telugu_transliterated_instruction", source.name),
+                input_text=optional_text(row, "telugu_transliterated_input"),
+                script="romanised Telugu",
+            ),
+            response=required_text(row, "telugu_transliterated_output", source.name),
+            source=source.name,
+            variant="romanised_telugu",
+        ),
+        TrainingExample(
+            prompt=_instruction_prompt(
+                instruction=required_text(row, "telugu_instruction", source.name),
+                input_text=optional_text(row, "telugu_input"),
+                script="native Telugu script",
+            ),
+            response=required_text(row, "telugu_output", source.name),
+            source=source.name,
+            variant="native_telugu",
+        ),
+    ]
+
+
+def _english_telugu_parallel(row: Mapping[str, Any], source: DatasetConfig) -> TrainingExample:
     return TrainingExample(
-        prompt=prompt,
-        response=required_text(row, "telugu_output", source.name),
+        prompt=(
+            "Translate this English sentence into natural Telugu script.\n"
+            "Use Telugu script, not romanised Telugu.\n\n"
+            f"English:\n{required_text(row, 'english', source.name)}"
+        ),
+        response=required_text(row, "telugu", source.name),
         source=source.name,
+        variant="native_telugu",
+    )
+
+
+def _samanantar_translation(row: Mapping[str, Any], source: DatasetConfig) -> TrainingExample:
+    return TrainingExample(
+        prompt=(
+            "Translate this English sentence into natural Telugu script.\n"
+            "Use Telugu script, not romanised Telugu.\n\n"
+            f"English:\n{required_text(row, 'src', source.name)}"
+        ),
+        response=required_text(row, "tgt", source.name),
+        source=source.name,
+        variant="native_telugu",
     )
 
 
@@ -221,10 +317,24 @@ def _indivibe_translation(row: Mapping[str, Any], source: DatasetConfig) -> Trai
     prompt = required_text(row, "prompt", source.name)
     return TrainingExample(
         prompt=(
-            f"Translate this {script} {language} benchmark prompt to English.\n"
+            f"Rewrite this English benchmark prompt in {language}.\n"
+            f"Expected script: {script}.\n"
             f"Category: {category}\n\n"
-            f"{prompt}"
+            f"English prompt:\n{required_text(row, 'original_prompt', source.name)}"
         ),
-        response=required_text(row, "original_prompt", source.name),
+        response=prompt,
         source=source.name,
+        variant="romanised_telugu" if script == "romanised" else "native_telugu",
     )
+
+
+def _instruction_prompt(instruction: str, input_text: str, script: str) -> str:
+    parts = [
+        f"Answer the following instruction in {script}.",
+        "",
+        "Instruction:",
+        instruction,
+    ]
+    if input_text:
+        parts.extend(["", "Input:", input_text])
+    return "\n".join(parts)

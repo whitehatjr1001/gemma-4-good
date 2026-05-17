@@ -25,7 +25,7 @@ def enabled_dataset_configs(config: AppConfig) -> list[DatasetConfig]:
     for source in dataset_configs(config):
         if not source.enabled:
             continue
-        if not load_all_examples and source.max_examples is None and total_examples > 0:
+        if not load_all_examples and total_examples > 0:
             source = replace(source, max_examples=max(1, round(total_examples * source.weight)))
         sources.append(source)
     return sources

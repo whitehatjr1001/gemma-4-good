@@ -31,8 +31,8 @@ def test_raw_export_sources_excludes_native_telugu() -> None:
     sources = raw_export_sources(config)
 
     assert [source.name for source in sources] == [
-        "symptom_diagnosis",
-        "medmcqa",
+        "english_telugu_parallel",
+        "samanantar_te",
         "indivibe_chat",
         "indivibe_stem",
     ]
@@ -43,7 +43,7 @@ def test_raw_export_sources_can_select_synthetic_telugu_sources() -> None:
 
     sources = raw_export_sources(config, language_statuses=("synthetic_telugu",))
 
-    assert [source.name for source in sources] == ["symptom_diagnosis", "medmcqa"]
+    assert [source.name for source in sources] == []
 
 
 def test_export_raw_dataset_filters_and_writes_parquet(

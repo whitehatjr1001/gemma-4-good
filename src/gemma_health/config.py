@@ -19,6 +19,7 @@ class ModelConfig:
     base_id: str
     max_seq_length: int
     load_in_4bit: bool
+    load_in_8bit: bool
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             base_id=str(raw["model"]["base_id"]),
             max_seq_length=int(raw["model"]["max_seq_length"]),
             load_in_4bit=bool(raw["model"]["load_in_4bit"]),
+            load_in_8bit=bool(raw["model"].get("load_in_8bit", False)),
         ),
         raw=raw,
     )

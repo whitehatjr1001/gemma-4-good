@@ -4,37 +4,59 @@ project:
   output_dir: artifacts
 
 model:
-  base_id: google/gemma-4-e4b
+  base_id: google/gemma-4-E4B-it
   max_seq_length: 2048
-  load_in_4bit: true
+  load_in_4bit: false
+  load_in_8bit: false
 
 datasets:
   - name: telugu_alpaca
     enabled: true
-    weight: 0.20
+    weight: 0.60
     language_status: native_telugu
     hf_id: Telugu-LLM-Labs/telugu_alpaca_yahma_cleaned_filtered_romanized
+    path: data/raw/parquet/telugu_alpaca/train.parquet
     split: train
-  - name: symptom_diagnosis
+  - name: english_telugu_parallel
     enabled: true
-    weight: 0.35
+    weight: 0.15
+    language_status: translation_pair
+    hf_id: HackHedron/English_Telugu_Parallel_Corpus
+    path: data/raw/hf_telugu/HackHedron__English_Telugu_Parallel_Corpus/default/train.parquet
+    split: train
+    max_examples: 20000
+  - name: samanantar_te
+    enabled: true
+    weight: 0.05
+    language_status: translation_pair
+    hf_id: ai4bharat/Samanantar
+    hf_config: te
+    path: data/raw/hf_telugu/ai4bharat__Samanantar/te/train.parquet
+    split: train
+    max_examples: 20000
+  - name: symptom_diagnosis
+    enabled: false
+    weight: 0.0
     language_status: synthetic_telugu
     hf_id: gretelai/symptom_to_diagnosis
+    path: data/raw/parquet_english/symptom_diagnosis/train.parquet
     split: train
     synthetic_telugu: true
   - name: medmcqa
-    enabled: true
-    weight: 0.25
+    enabled: false
+    weight: 1.0
     language_status: synthetic_telugu
     hf_id: openlifescienceai/medmcqa
+    path: data/raw/parquet_english/medmcqa/train.parquet
     split: train
     synthetic_telugu: true
   - name: indivibe_chat
     enabled: true
-    weight: 0.10
+    weight: 0.15
     language_status: translation_pair
     hf_id: sarvamai/indivibe
     hf_config: chat
+    path: data/raw/parquet/indivibe_chat/test.parquet
     split: test
     language: Telugu
     scripts:
@@ -42,10 +64,11 @@ datasets:
       - romanised
   - name: indivibe_stem
     enabled: true
-    weight: 0.10
+    weight: 0.05
     language_status: translation_pair
     hf_id: sarvamai/indivibe
     hf_config: stem
+    path: data/raw/parquet/indivibe_stem/test.parquet
     split: test
     language: Telugu
     scripts:
@@ -57,6 +80,34 @@ datasets:
     language_status: needs_translation
     hf_id: mehaksingal/illegible-medical-prescription-images-dataset
     split: train
+  - name: medqa_usmle
+    enabled: false
+    weight: 0.0
+    language_status: needs_translation
+    hf_id: openlifescienceai/MedQA-USMLE-4-options-hf
+    path: data/raw/hf_medical/openlifescienceai__MedQA-USMLE-4-options-hf/default/train.parquet
+    split: train
+  - name: emrqa_msquad
+    enabled: false
+    weight: 0.0
+    language_status: needs_translation
+    hf_id: Eladio/emrqa-msquad
+    path: data/raw/hf_medical/Eladio__emrqa-msquad/default/train.parquet
+    split: train
+  - name: mts_dialog
+    enabled: false
+    weight: 0.0
+    language_status: needs_translation
+    hf_id: lyumengxian/MTS-Dialog
+    path: data/raw/hf_medical/lyumengxian__MTS-Dialog/default/train.parquet
+    split: train
+  - name: chatdoctor_200k
+    enabled: false
+    weight: 0.0
+    language_status: needs_translation
+    hf_id: LinhDuong/chatdoctor-200k
+    path: data/raw/hf_medical/LinhDuong__chatdoctor-200k/default/train.parquet
+    split: train
   - name: field_dialogues
     enabled: false
     weight: 0.0
@@ -67,15 +118,118 @@ datasets:
 training:
   method: sft
   backend: unsloth
-  run_name: 000_smoke
+  adapter: telugu
+  run_name: h1_telugu_broad_probe_001
   load_all_examples: true
   train_examples: 1000
-  batch_size: 2
+  batch_size: 4
+  eval_batch_size: 1
   gradient_accumulation_steps: 8
-  learning_rate: 0.00002
+  learning_rate: 0.00005
+  lr_scheduler_type: cosine
+  warmup_ratio: 0.03
+  weight_decay: 0.01
+  optim: adamw_8bit
   epochs: 1
-  save_steps: 100
+  max_steps: -1
+  save_steps: 500
+  eval_steps: 500
+  logging_steps: 5
+  report_to:
+    - wandb
+  wandb_project: gemma-health-adapters
+  packing: true
+  skip_eval: false
+  resume_from_checkpoint: true
+  lora:
+    r: 16
+    alpha: 16
+    dropout: 0.0
+    bias: none
+    use_rslora: false
+    use_gradient_checkpointing: unsloth
   push_to_hub: false
+  push_on_failure: true
+  adapters:
+    telugu:
+      output_dir: artifacts/adapters/telugu
+      sft_jsonl: data/processed/sft/telugu/train.jsonl
+      test_jsonl: data/processed/sft/telugu/test.jsonl
+      hub_dataset_id:
+      dataset_split: train
+      test_dataset_split: test
+      streaming: true
+      hub_model_id: RohithMidigudla/gemma-health-telugu-lora-h1
+      max_examples:
+      train_split_ratio: 0.8
+      variant_multipliers:
+        romanised_telugu: 5
+        native_telugu: 1
+      dataset_names:
+        - telugu_alpaca
+        - english_telugu_parallel
+        - samanantar_te
+        - indivibe_chat
+        - indivibe_stem
+    telugu_raw:
+      output_dir: artifacts/adapters/telugu_raw
+      sft_jsonl: data/processed/sft/telugu_raw/train.jsonl
+      test_jsonl: data/processed/sft/telugu_raw/test.jsonl
+      hub_dataset_id:
+      dataset_split: train
+      test_dataset_split: test
+      streaming: true
+      max_examples:
+      train_split_ratio: 0.8
+      variant_multipliers:
+        romanised_telugu: 1
+        native_telugu: 1
+      source_max_examples:
+        english_telugu_parallel: 100000
+        samanantar_te: 200000
+      dataset_names:
+        - telugu_alpaca
+        - english_telugu_parallel
+        - samanantar_te
+        - indivibe_chat
+        - indivibe_stem
+    medical:
+      output_dir: artifacts/adapters/medical
+      sft_jsonl: data/processed/sft/medical/train.jsonl
+      test_jsonl: data/processed/sft/medical/test.jsonl
+      hub_dataset_id:
+      dataset_split: train
+      test_dataset_split: test
+      streaming: true
+      hub_model_id: RohithMidigudla/gemma-health-medical-lora-h2
+      max_examples:
+      train_split_ratio: 0.8
+      dataset_names:
+        - medmcqa
+    ocr:
+      output_dir: artifacts/adapters/ocr
+      sft_jsonl: data/processed/sft/ocr/train.jsonl
+      test_jsonl: data/processed/sft/ocr/test.jsonl
+      hub_dataset_id:
+      dataset_split: train
+      test_dataset_split: test
+      streaming: true
+      max_examples: 10000
+      train_split_ratio: 0.8
+      dataset_names:
+        - prescriptions
+    asha:
+      output_dir: artifacts/adapters/asha
+      sft_jsonl: data/processed/sft/asha/train.jsonl
+      test_jsonl: data/processed/sft/asha/test.jsonl
+      hub_dataset_id:
+      dataset_split: train
+      test_dataset_split: test
+      streaming: true
+      max_examples: 10000
+      train_split_ratio: 0.8
+      dataset_names:
+        - symptom_diagnosis
 
 grpo:
   group_size: 8

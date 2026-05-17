@@ -14,6 +14,7 @@ class TrainingExample:
     prompt: str
     response: str
     source: str
+    variant: str = "default"
 
 
 @dataclass(frozen=True)

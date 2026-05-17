@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -304,7 +305,8 @@ def _generate_row_with_retries(
         except ValueError as err:
             last_error = err
     assert last_error is not None
-    raise last_error
+    print(f"warning: marking row as NEEDS_REVIEW after generation failure: {last_error}", flush=True)
+    return TeluguPair(telugu="NEEDS_REVIEW", romanised_telugu="NEEDS_REVIEW")
 
 
 def _task_for_dataset(dataset_name: str) -> str:
@@ -351,7 +353,7 @@ def _message_pair(response: dict[str, Any]) -> TeluguPair:
         content = f"{content.rstrip()}" + '"}'
         end = content.rfind("}")
     try:
-        payload = json.loads(content[start : end + 1])
+        payload = _load_json_object(content[start : end + 1])
     except json.JSONDecodeError as err:
         raise ValueError("Ollama response JSON could not be parsed") from err
     if not isinstance(payload, dict):
@@ -363,6 +365,20 @@ def _message_pair(response: dict[str, Any]) -> TeluguPair:
     if not isinstance(romanised_telugu, str) or not romanised_telugu.strip():
         romanised_telugu = "NEEDS_REVIEW"
     return TeluguPair(telugu=telugu.strip(), romanised_telugu=romanised_telugu.strip())
+
+
+def _load_json_object(content: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        payload = json.loads(_escape_invalid_json_backslashes(content))
+    if not isinstance(payload, dict):
+        raise ValueError("Ollama response JSON must be an object")
+    return payload
+
+
+def _escape_invalid_json_backslashes(content: str) -> str:
+    return re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', r"\\\\", content)
 
 
 def _message_content(response: dict[str, Any]) -> str:

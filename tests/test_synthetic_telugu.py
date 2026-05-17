@@ -100,6 +100,30 @@ def test_message_pair_falls_back_when_json_missing() -> None:
     assert pair.romanised_telugu == "NEEDS_REVIEW"
 
 
+def test_message_pair_repairs_invalid_json_backslash_escape() -> None:
+    pair = synthetic_telugu._message_pair(
+        {"message": {"content": '{"telugu":"వాక్యం \\u bad","romanised_telugu":"vaakyam \\u bad"}'}}
+    )
+
+    assert pair.telugu == "వాక్యం \\u bad"
+    assert pair.romanised_telugu == "vaakyam \\u bad"
+
+
+def test_generate_row_with_retries_marks_failed_rows_for_review() -> None:
+    pair = synthetic_telugu._generate_row_with_retries(
+        row={},
+        dataset_name="medmcqa",
+        model="qwen3:30b-a3b",
+        client=FakeOllama(),
+        num_predict=32,
+        temperature=0.0,
+        retries=1,
+    )
+
+    assert pair.telugu == "NEEDS_REVIEW"
+    assert pair.romanised_telugu == "NEEDS_REVIEW"
+
+
 def test_medmcqa_prompt_tolerates_missing_correct_option() -> None:
     prompt = synthetic_telugu._format_medmcqa_prompt(
         {

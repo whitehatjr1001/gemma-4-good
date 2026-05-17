@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -58,6 +59,8 @@ class DatasetSource(Protocol):
     name: str
 
     def load(self) -> list[TrainingExample]: ...
+
+    def iter_examples(self) -> Iterator[TrainingExample]: ...
 
 
 def load_dataset(source: DatasetConfig) -> DatasetSource:

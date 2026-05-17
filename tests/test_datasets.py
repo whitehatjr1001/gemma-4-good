@@ -18,16 +18,22 @@ def test_enabled_dataset_configs_load_all_examples_by_default() -> None:
 
     assert [source.name for source in sources] == [
         "telugu_alpaca",
-        "symptom_diagnosis",
-        "medmcqa",
+        "english_telugu_parallel",
+        "samanantar_te",
         "indivibe_chat",
         "indivibe_stem",
     ]
-    assert all(source.max_examples is None for source in sources)
+    assert {source.name: source.max_examples for source in sources} == {
+        "telugu_alpaca": None,
+        "english_telugu_parallel": 20000,
+        "samanantar_te": 20000,
+        "indivibe_chat": None,
+        "indivibe_stem": None,
+    }
     assert {source.name: source.language_status for source in sources} == {
         "telugu_alpaca": "native_telugu",
-        "symptom_diagnosis": "synthetic_telugu",
-        "medmcqa": "synthetic_telugu",
+        "english_telugu_parallel": "translation_pair",
+        "samanantar_te": "translation_pair",
         "indivibe_chat": "translation_pair",
         "indivibe_stem": "translation_pair",
     }
@@ -49,8 +55,13 @@ def test_load_training_examples_from_multiple_hf_sources(monkeypatch: pytest.Mon
                 "telugu_instruction": "లక్షణాలు చెప్పండి",
                 "telugu_input": "",
                 "telugu_output": "PHC కి వెళ్లండి",
+                "telugu_transliterated_instruction": "lakshanalu cheppandi",
+                "telugu_transliterated_input": "",
+                "telugu_transliterated_output": "PHC ki vellandi",
             }
         ],
+        "english_telugu_parallel": [{"english": "Hello", "telugu": "హలో"}],
+        "samanantar_te": [{"src": "Go to school.", "tgt": "పాఠశాలకు వెళ్ళు."}],
         "symptom_diagnosis": [{"input_text": "high fever", "output_text": "dengue"}],
         "medmcqa": [
             {
@@ -91,19 +102,26 @@ def test_load_training_examples_from_multiple_hf_sources(monkeypatch: pytest.Mon
 
     examples = load_training_examples(config)
 
-    assert len(examples) == 5
+    assert len(examples) == 6
     assert {example.source for example in examples} == {
         "telugu_alpaca",
-        "symptom_diagnosis",
-        "medmcqa",
+        "english_telugu_parallel",
+        "samanantar_te",
         "indivibe_chat",
         "indivibe_stem",
     }
-    symptom = next(example for example in examples if example.source == "symptom_diagnosis")
-    medmcqa = next(example for example in examples if example.source == "medmcqa")
-    assert "లక్షణాలు" in symptom.prompt
-    assert "సంభావ్య నిర్ధారణ" in symptom.response
-    assert "సరైన సమాధానం" in medmcqa.response
+    parallel = next(example for example in examples if example.source == "english_telugu_parallel")
+    samanantar = next(example for example in examples if example.source == "samanantar_te")
+    alpaca = [example for example in examples if example.source == "telugu_alpaca"]
+    indivibe = next(example for example in examples if example.source == "indivibe_stem")
+    assert len(alpaca) == 2
+    assert any("romanised Telugu" in example.prompt for example in alpaca)
+    assert any(example.response == "PHC ki vellandi" for example in alpaca)
+    assert "natural Telugu script" in parallel.prompt
+    assert parallel.response == "హలో"
+    assert samanantar.response == "పాఠశాలకు వెళ్ళు."
+    assert "Expected script: romanised" in indivibe.prompt
+    assert indivibe.response == "Vaccine ela panichestundi?"
 
 
 def test_field_dialogues_requires_existing_file() -> None:
@@ -117,6 +135,31 @@ def test_field_dialogues_requires_existing_file() -> None:
 
     with pytest.raises(FileNotFoundError, match="Field dialogues file does not exist"):
         JsonlDataset(source).load()
+
+
+def test_local_parquet_dataset_respects_max_examples(tmp_path: Path) -> None:
+    pd = pytest.importorskip("pandas")
+    path = tmp_path / "parallel.parquet"
+    pd.DataFrame(
+        [
+            {"english": "one", "telugu": "ఒకటి"},
+            {"english": "two", "telugu": "రెండు"},
+        ]
+    ).to_parquet(path, index=False)
+    source = DatasetConfig(
+        name="english_telugu_parallel",
+        enabled=True,
+        weight=1.0,
+        split="train",
+        path=str(path),
+        max_examples=1,
+        language_status="translation_pair",
+    )
+
+    examples = loader.build_dataset(source).load()
+
+    assert len(examples) == 1
+    assert examples[0].response == "ఒకటి"
 
 
 def test_indivibe_filters_before_max_examples(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,4 +196,5 @@ def test_indivibe_filters_before_max_examples(monkeypatch: pytest.MonkeyPatch) -
     examples = loader.build_dataset(source).load()
 
     assert len(examples) == 1
-    assert examples[0].response == "Telugu source"
+    assert examples[0].prompt.startswith("Rewrite this English benchmark prompt in Telugu.")
+    assert examples[0].response == "తెలుగు ప్రశ్న"
