@@ -232,9 +232,26 @@ training:
         - symptom_diagnosis
 
 grpo:
+  base_model_id: RohithMidigudla/gemma-health-telugu-medical-merged-h1-30-h2-70
+  dataset_path: data/staged/synthetic_telugu/medmcqa/train.parquet
+  split: train
+  output_dir: artifacts/adapters/grpo_policy_v1
+  hub_model_id: RohithMidigudla/gemma-health-telugu-medical-grpo-policy-v1
+  max_examples:
+  batch_size: 16
+  gradient_accumulation_steps: 1
+  learning_rate: 0.000005
+  max_steps: 300
   group_size: 8
+  num_generations: 8
+  generation_batch_size: 64
   max_prompt_length: 1024
-  max_completion_length: 512
+  max_completion_length: 128
+  use_vllm: false
+  vllm_gpu_memory_utilization: 0.55
+  save_steps: 100
+  logging_steps: 5
+  push_to_hub: false
   rewards:
     - triage_format
     - safety_escalation
